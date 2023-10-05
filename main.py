@@ -1,16 +1,13 @@
-import requests
 import dotenv
 import os
 import logging
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
 from utils import setup_logging
 import utils.twitch
 import utils.mongo
-import json
-from typing import Optional, Dict, List
+from apscheduler.schedulers.background import BackgroundScheduler
 
 logger = logging.getLogger()
 dotenv_file = dotenv.find_dotenv()
@@ -21,6 +18,17 @@ REDIRECT_URL = os.getenv('REDIRECT_URL')
 
 app = FastAPI()
 
+# Initialize the APScheduler
+scheduler = BackgroundScheduler()
+scheduler.start()
+scheduler.add_job(
+    utils.mongo.validate_tokens,
+    trigger="interval",
+    hours=1,
+    id="hourly_token_validation",
+    replace_existing=True,
+)
+
 class MarkerPayload(BaseModel):
     user_id: str
     description: str
@@ -29,7 +37,6 @@ class MarkerPayload(BaseModel):
 # This is where the user is redirected to after allowing the app
 @app.get("/auth")
 async def auth(code: str, scope: str):
-    
     try:
         access_token, refresh_token = utils.twitch.get_token(
             TWITCH_CLIENT_ID,
@@ -40,10 +47,12 @@ async def auth(code: str, scope: str):
         if access_token:
             user_id, user_login = utils.twitch.get_user_data(TWITCH_CLIENT_ID, access_token)
             # Store user data and access tokens in mongoDB
-            utils.mongo.upsert_access_token(user_id, user_login, access_token, refresh_token)
+            app_user_id = utils.mongo.upsert_access_token(user_id, user_login, access_token, refresh_token)
+            
         else:
             return {"message": "Failed to obtain an access token"}
-        return {"message": "Authentication Successful"}
+
+        return f"Authentication successful! Private client code: {app_user_id}"
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -55,10 +64,21 @@ async def user(login):
         return {"user_id": user_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+def authorize_user(user, client_code):
+    target_user = utils.mongo.get_client_id(client_code)
+    logger.info(f"target_user {target_user}")
+    if user != target_user:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    logging.info(f"user {user} authorized")
 
 @app.post("/marker")
-async def marker(markerPayload: MarkerPayload):
+async def marker(
+    markerPayload: MarkerPayload,
+    X_Client_Code: str = Header(..., description="Client code supplied during authentication", convert_underscores=True)   
+):
     try:
+        authorize_user(markerPayload.user_id, X_Client_Code)
         login_id, access_token, refresh_token =  utils.mongo.get_tokens(markerPayload.user_id)
         response = utils.twitch.request_stream_marker(
             TWITCH_CLIENT_ID,
@@ -78,6 +98,9 @@ async def marker(markerPayload: MarkerPayload):
                 markerPayload.description
             )
         return response.json()
+
+    except HTTPException as e:
+        raise e
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
