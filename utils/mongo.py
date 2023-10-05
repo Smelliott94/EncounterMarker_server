@@ -3,6 +3,7 @@ import os
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from bson import ObjectId
+from utils import setup_logging
 logger = logging.getLogger()
 
 MONGODB_USER = os.getenv('MONGODB_USER')
@@ -16,10 +17,10 @@ def _init_connection(collection_name, db_name='encountermarker'):
     collection = db[collection_name]
     return client, collection
 
-def get_client_id(client_id):
+def get_client_id(client_id: ObjectId):
     # Get twitch user id from Database _id
     client, access_token_collection = _init_connection("access_tokens")
-    result = access_token_collection.find_one({"_id": ObjectId(client_id)})
+    result = access_token_collection.find_one({"_id": client_id})
     client.close()
     logger.info(result)
     return result["id"]
