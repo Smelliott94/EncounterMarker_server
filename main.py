@@ -104,6 +104,11 @@ async def marker(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/auth_link")
+async def auth_link():
+    link = f"https://id.twitch.tv/oauth2/authorize?client_id={TWITCH_CLIENT_ID}&redirect_uri=https://encountermarkerserver.onrender.com/auth&response_type=code&scope=user:edit:broadcast"
+    return {"twitch_auth_link": link}
 
 if __name__ == "__main__":
     import uvicorn
