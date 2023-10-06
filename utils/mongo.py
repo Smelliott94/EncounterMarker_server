@@ -66,4 +66,4 @@ def upsert_access_token(user_id, user_login, access_token, refresh_token):
 def validate_tokens():
     # TODO grab all the tokens and validate with twitch API https://dev.twitch.tv/docs/authentication/validate-tokens/
     # If the token is invalid then null the corresponding token and refresh_token in the DB 
-    logger("validation complete")
+    logger.info("validation complete")
